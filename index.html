@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GeoCond: A Conditioning-Aware Reliability Adapter for Feed-Forward 3D Reconstruction</title>
+  <meta name="description" content="GeoCond is a lightweight reliability adapter for frozen feed-forward 3D reconstruction models such as VGGT. From one backbone pass it predicts pose-level uncertainty and whether bundle adjustment should be applied. WACV 2027.">
+  <meta name="keywords" content="GeoCond, VGGT, feed-forward 3D reconstruction, relative pose, uncertainty, bundle adjustment, reliability, WACV 2027">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="GeoCond: A Conditioning-Aware Reliability Adapter for Feed-Forward 3D Reconstruction">
+  <meta property="og:description" content="Know when to trust feed-forward 3D: pose-level uncertainty and a refinement gate for frozen backbones such as VGGT, from a single forward pass. WACV 2027.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta property="og:url" content="https://geocond.github.io/">
+  <meta property="og:image" content="https://geocond.github.io/static/images/og.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23138d75'/%3E%3Ctext x='32' y='45' font-family='Arial,sans-serif' font-size='38' font-weight='700' fill='white' text-anchor='middle'%3EG%3C/text%3E%3C/svg%3E">
+
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/academicons/1.9.4/css/academicons.min.css">
+  <link rel="stylesheet" href="static/css/index.css">
+</head>
+<body>
+
+<!-- ================================================================ title -->
+<section class="hero is-header">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <h1 class="title is-2 publication-title">
+            <span class="method">GeoCond</span>: A Conditioning-Aware Reliability Adapter for Feed-Forward 3D Reconstruction
+          </h1>
+          <p class="publication-subtitle">Know when to trust feed-forward 3D</p>
+
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">David Ahmedt-Aristizabal<sup>1</sup>,</span>
+            <span class="author-block">Mohammad Ali Armin<sup>1</sup>,</span>
+            <span class="author-block">Russell Tsuchida<sup>2</sup>,</span>
+            <span class="author-block">Lars Petersson<sup>1</sup></span>
+          </div>
+          <div class="affiliations">
+            <span class="author-block"><sup>1</sup>CSIRO, Australia</span>
+            <span class="author-block"><sup>2</sup>Monash University, Australia</span>
+          </div>
+
+          <div class="publication-venue">WACV 2027</div>
+
+          <div class="publication-links">
+            <span class="link-block">
+              <a class="external-link button is-normal is-rounded is-dark" disabled title="WACV 2027 proceedings version coming soon">
+                <span class="icon"><i class="fas fa-file-pdf"></i></span>
+                <span>Paper</span><span class="soon">(soon)</span>
+              </a>
+            </span>
+            <span class="link-block">
+              <a href="https://arxiv.org/abs/2609.18465" target="_blank" rel="noopener"
+                 class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><i class="ai ai-arxiv"></i></span>
+                <span>arXiv</span>
+              </a>
+            </span>
+            <span class="link-block">
+              <a class="external-link button is-normal is-rounded is-dark" disabled title="Code release coming soon">
+                <span class="icon"><i class="fab fa-github"></i></span>
+                <span>Code</span><span class="soon">(soon)</span>
+              </a>
+            </span>
+            <span class="link-block">
+              <a href="#BibTeX" class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><i class="fas fa-quote-right"></i></span>
+                <span>BibTeX</span>
+              </a>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ demo -->
+<section class="hero demo" id="demo">
+  <div class="container is-max-desktop">
+    <div class="hero-body">
+      <p class="demo-lead">
+        VGGT gets the pose of these two photos badly wrong, and its own confidence does not single the pair out.
+        GeoCond reads the same forward pass and ranks the pair among the least reliable.
+      </p>
+      <div class="demo-card">
+        <div class="demo-grid">
+          <div class="demo-photos">
+            <figure class="demo-photo">
+              <img id="demo-view1" src="static/demo/demo0_view1.webp" alt="View 1">
+              <span class="demo-badge">view 1</span>
+            </figure>
+            <figure class="demo-photo">
+              <img id="demo-view2" src="static/demo/demo0_view2.webp" alt="View 2">
+              <span class="demo-badge">view 2</span>
+            </figure>
+          </div>
+          <div class="demo-map">
+            <img id="demo-map" src="static/demo/demo0_map.webp" width="512" height="513"
+                 alt="Bird's-eye map of the two cameras over VGGT's point map">
+            <ul class="demo-legend">
+              <li><svg class="swatch" viewBox="0 0 22 16" aria-hidden="true"><path d="M11 14.5 L4 2.5 A13 13 0 0 1 18 2.5 Z" fill="rgba(60,64,67,0.22)" stroke="#3c4043" stroke-width="1.8" stroke-linejoin="round"/></svg>view 1</li>
+              <li><svg class="swatch" viewBox="0 0 22 16" aria-hidden="true"><path d="M11 14.5 L4 2.5 A13 13 0 0 1 18 2.5 Z" fill="rgba(214,69,65,0.26)" stroke="#d64541" stroke-width="1.8" stroke-linejoin="round"/></svg>view 2, VGGT's pose</li>
+              <li><svg class="swatch" viewBox="0 0 22 16" aria-hidden="true"><path d="M11 14.5 L4 2.5 A13 13 0 0 1 18 2.5 Z" fill="rgba(31,157,99,0.10)" stroke="#1f9d63" stroke-width="1.8" stroke-dasharray="2.6 1.8" stroke-linejoin="round"/></svg>view 2, true pose</li>
+            </ul>
+            <p class="demo-map-note">Bird's-eye view; view 1 faces up.</p>
+          </div>
+          <div class="demo-verdict">
+            <div class="demo-error">
+              <div class="demo-key">VGGT pose error</div>
+              <div class="demo-error-value" id="demo-err"></div>
+            </div>
+            <div class="demo-key">Uncertainty percentile</div>
+            <div class="meter">
+              <div class="meter-head"><span>VGGT confidence</span><span class="meter-value" id="demo-native-value"></span></div>
+              <div class="meter-track"><div class="meter-fill is-native" id="demo-native-bar"></div></div>
+            </div>
+            <div class="meter">
+              <div class="meter-head"><span><b>GeoCond</b></span><span class="meter-value is-geocond" id="demo-geocond-value"></span></div>
+              <div class="meter-track"><div class="meter-fill is-geocond" id="demo-geocond-bar"></div></div>
+            </div>
+            <p class="demo-scale" id="demo-scale"></p>
+          </div>
+        </div>
+        <div class="demo-footer">
+          <p class="demo-caption" id="demo-caption"></p>
+          <div class="buttons has-addons demo-switch" id="demo-switch"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ teaser -->
+<section class="hero teaser">
+  <div class="container is-max-desktop">
+    <div class="hero-body">
+      <img src="static/images/teaser.webp" width="1621" height="836"
+           alt="Three pipelines: feed-forward only, where pose-level trust is not explicit; always refine, where bundle adjustment helps supported pairs but can harm weak ones; and GeoCond, which adds a head on the frozen backbone that outputs pose uncertainty and a refinement gate and routes each pair to keep, refine, prune or capture more.">
+      <p class="tldr">
+        <strong>TL;DR</strong>: GeoCond attaches a 19.6k-parameter head to a frozen VGGT. From the same single
+        forward pass it predicts how far each relative camera pose can be trusted and whether bundle adjustment
+        is likely to improve it or make it worse.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ abstract -->
+<section class="section is-shaded">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Abstract</h2>
+        <div class="content has-text-justified">
+          <p>
+            Feed-forward 3D foundation models such as VGGT predict cameras, depth, and point maps in a single pass,
+            but can fail silently under low overlap, low parallax, and extreme relative rotation. Stratified analyses
+            over these factors show that these failures are governed by geometric conditioning and are poorly
+            captured by native aleatoric confidence.
+          </p>
+          <p>
+            We introduce <b>GeoCond</b>, a lightweight reliability adapter for frozen feed-forward 3D backbones.
+            GeoCond reads geometric conditioning cues and the backbone's own stability signals and outputs
+            pose-level uncertainty and a refinement gate. During training, it can be supervised by
+            frame-permutation orbit variance, ground-truth pose error when labels are available, or cycle residuals
+            from unlabelled independent pose graphs. At inference, the default head requires only one backbone pass
+            and a small MLP.
+          </p>
+          <p>
+            On VGGT, GeoCond improves out-of-distribution (OOD) AUSE (area under the sparsification-error curve;
+            lower is better) from 0.32 to 0.20 over native confidence on held-out outdoor scenes (and to 0.21 when
+            trained on indoor data only) and avoids the collapse caused by applying bundle adjustment uniformly,
+            without improving on feed-forward poses there. For three of six backbones, cycle-distilled variants
+            provide a ground-truth-free adaptation route, including cases where permutation variance vanishes on
+            equivariant models. The same reliability signal supports gated refinement, pose-graph weighting,
+            calibration, curation, and capture decisions. Reliable feed-forward 3D reconstruction requires not only
+            predicting geometry, but also knowing when that geometry should be trusted.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ failure analysis -->
+<section class="section" id="failures">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Feed-forward poses fail where the geometry is ill-conditioned</h2>
+    <div class="columns is-vcentered">
+      <div class="column is-5">
+        <figure class="figure">
+          <a href="static/images/parallax.png" target="_blank" rel="noopener">
+            <img src="static/images/parallax.png" width="1029" height="729" loading="lazy"
+                 alt="Bar and line chart: median VGGT pose error falls from 17.4 degrees at 0 to 1 degree parallax to about 3 degrees above 15 degrees parallax, and the orbit-variance uncertainty follows the same trend.">
+          </a>
+          <figcaption>VGGT pose error (bars) and orbit-variance uncertainty (line) across parallax buckets on
+            7-Scenes.</figcaption>
+        </figure>
+      </div>
+      <div class="column is-7">
+        <div class="content has-text-justified lead">
+          <p>
+            On 7-Scenes, VGGT's median relative-pose error rises from about 3.0&deg; at high parallax to
+            17.4&deg; below 1&deg; parallax, and 22% of those low-parallax pairs exceed 30&deg;. Low overlap and
+            large relative rotation have the same effect. The orbit variance, the spread of a pose when the frozen
+            backbone is re-run on permuted frame orders, follows the error closely. VGGT's native per-pixel
+            confidence does not.
+          </p>
+          <p>
+            The pattern repeats on MegaUnScene (outdoor, extreme views), MegaDepth-1500 and ScanNet-1500: a
+            conditioning-based score ranks pose error better than native confidence on all six evaluation sets in the paper.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="columns is-multiline stats">
+      <div class="column is-3-desktop is-6-tablet">
+        <div class="stat">
+          <div class="value">17.4&deg;<span class="vs">vs</span><span class="base">3.0&deg;</span></div>
+          <div class="stat-label">median error below 1&deg; parallax vs. at high parallax (7-Scenes)</div>
+        </div>
+      </div>
+      <div class="column is-3-desktop is-6-tablet">
+        <div class="stat">
+          <div class="value">44.2&deg;<span class="vs">vs</span><span class="base">3.3&deg;</span></div>
+          <div class="stat-label">the same contrast on MegaUnScene outdoor extreme-view pairs</div>
+        </div>
+      </div>
+      <div class="column is-3-desktop is-6-tablet">
+        <div class="stat">
+          <div class="value">54%</div>
+          <div class="stat-label">of 7-Scenes office pairs with overlap &lt; 0.01 fail catastrophically (error &gt; 30&deg;)</div>
+        </div>
+      </div>
+      <div class="column is-3-desktop is-6-tablet">
+        <div class="stat">
+          <div class="value">0.163<span class="vs">vs</span><span class="base">0.323</span></div>
+          <div class="stat-label">AUSE of a conditioning-based score vs. native confidence on MegaUnScene (lower is better)</div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="title is-4">Stratified by overlap and relative rotation</h3>
+    <div class="table-wrap">
+      <table class="results">
+        <thead>
+          <tr>
+            <th>Dataset</th><th>Bin</th><th>n</th><th>Med. error</th><th>Cat. rate</th>
+            <th>Native AUSE &darr;</th><th>GeoCond AUSE &darr;</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>7-Scenes office</td><td>overlap &lt; 0.01</td><td>227</td><td>42.2&deg;</td><td>54%</td><td class="best">0.263</td><td>0.284</td></tr>
+          <tr><td>7-Scenes office</td><td>overlap 0.01&ndash;0.3</td><td>112</td><td>6.8&deg;</td><td>11%</td><td>0.189</td><td class="best">0.064</td></tr>
+          <tr><td>7-Scenes office</td><td>overlap &ge; 0.3</td><td>361</td><td>7.4&deg;</td><td>19%</td><td>0.213</td><td class="best">0.142</td></tr>
+          <tr><td>7-Scenes office</td><td>rotation &lt; 30&deg;</td><td>362</td><td>7.6&deg;</td><td>19%</td><td>0.207</td><td class="best">0.139</td></tr>
+          <tr><td>7-Scenes office</td><td>rotation 30&ndash;90&deg;</td><td>179</td><td>11.0&deg;</td><td>20%</td><td>0.231</td><td class="best">0.141</td></tr>
+          <tr><td>7-Scenes office</td><td>rotation &ge; 90&deg;</td><td>159</td><td>85.5&deg;</td><td>63%</td><td class="best">0.178</td><td>0.204</td></tr>
+          <tr class="sep"><td>MegaUnScene (OOD)</td><td>overlap &lt; 0.01</td><td>491</td><td>11.3&deg;</td><td>32%</td><td>0.429</td><td class="best">0.251</td></tr>
+          <tr><td>MegaUnScene (OOD)</td><td>overlap 0.01&ndash;0.3</td><td>305</td><td>3.5&deg;</td><td>5%</td><td>0.193</td><td class="best">0.165</td></tr>
+          <tr><td>MegaUnScene (OOD)</td><td>overlap &ge; 0.3</td><td>104</td><td>10.0&deg;</td><td>27%</td><td>0.385</td><td class="best">0.285</td></tr>
+          <tr><td>MegaUnScene (OOD)</td><td>rotation &lt; 30&deg;</td><td>323</td><td>5.7&deg;</td><td>14%</td><td>0.333</td><td class="best">0.207</td></tr>
+          <tr><td>MegaUnScene (OOD)</td><td>rotation 30&ndash;90&deg;</td><td>400</td><td>5.2&deg;</td><td>21%</td><td>0.239</td><td class="best">0.149</td></tr>
+          <tr><td>MegaUnScene (OOD)</td><td>rotation &ge; 90&deg;</td><td>177</td><td>18.7&deg;</td><td>40%</td><td>0.547</td><td class="best">0.357</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-caption">
+      Table 2 in the paper. Held-out 7-Scenes office and MegaUnScene pairs, binned by ground-truth overlap and
+      relative rotation. The catastrophic rate is the share of pairs with pose error above 30&deg;. Out of distribution, GeoCond ranks pose error better than native
+      confidence in every bin; on 7-Scenes office, native confidence is better in the two most extreme bins.
+    </p>
+  </div>
+</section>
+
+<!-- ================================================================ method -->
+<section class="section is-shaded" id="method">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Method</h2>
+    <div class="content has-text-justified lead">
+      <p>
+        GeoCond is a small MLP applied to every image pair after one pass of the frozen backbone. During training,
+        the frozen backbone also supplies the targets: a frame-permutation ensemble gives an uncertainty teacher,
+        and comparing bundle-adjusted with feed-forward poses gives the target for the refinement gate. That
+        comparison needs ground-truth poses. The backbone is never updated; only the head is optimised.
+      </p>
+    </div>
+    <figure class="figure is-framed">
+      <a href="static/images/overview.webp" target="_blank" rel="noopener">
+        <img src="static/images/overview.webp" width="2400" height="1235" loading="lazy"
+             alt="Method overview in three rows: training-time supervision from a frame-permutation ensemble and a bundle-adjustment versus feed-forward comparison; single-pass inference in which the GeoCond head reads conditioning features and outputs pose uncertainty and a refinement gate; downstream use of the uncertainty to weight or prune pose-graph edges.">
+      </a>
+      <figcaption><b>Overview.</b> (1) Training-time supervision, (2) single-pass inference with a per-pair
+        refine-or-keep decision, (3) downstream use of the uncertainty in pose-graph fusion.</figcaption>
+    </figure>
+
+    <div class="columns is-multiline" style="margin-top: 1.25rem;">
+      <div class="column is-4-desktop is-12-tablet">
+        <div class="card-panel">
+          <h4>Seven inputs per pair</h4>
+          <p>All computed from the backbone's own predictions in the single forward pass.</p>
+          <p style="margin-top: 0.5rem;"><b>Geometric conditioning cues</b></p>
+          <ul>
+            <li>triangulation parallax</li>
+            <li>co-visibility (overlap)</li>
+            <li>baseline</li>
+            <li>relative rotation</li>
+          </ul>
+          <p style="margin-top: 0.5rem;"><b>Backbone stability signals</b></p>
+          <ul>
+            <li>camera-head rotation and translation correction across its iterations</li>
+            <li>native depth confidence</li>
+          </ul>
+        </div>
+      </div>
+      <div class="column is-4-desktop is-12-tablet">
+        <div class="card-panel">
+          <h4>Two outputs</h4>
+          <ul>
+            <li><b>Pose uncertainty u<sub>ij</sub></b>: ranks, prunes, calibrates or weights relative poses.</li>
+            <li><b>Refinement gate g<sub>ij</sub></b>: keep the feed-forward pose, or run light bundle adjustment.</li>
+          </ul>
+          <p style="margin-top: 0.75rem;">
+            The head has 19.6k parameters and takes 0.17&nbsp;ms per ten pairs, 0.2% of a 95.6&nbsp;ms VGGT pass.
+            The conditioning scalars add 3.5&nbsp;ms per five-frame tuple on the GPU; one bundle-adjustment call
+            costs 4.0&nbsp;s.
+          </p>
+        </div>
+      </div>
+      <div class="column is-4-desktop is-12-tablet">
+        <div class="card-panel">
+          <h4>Three ways to supervise the uncertainty</h4>
+          <p><span class="tag variant">GeoCond-O</span> orbit-distilled (default): spread of the relative pose over
+            K&nbsp;=&nbsp;6 frame permutations. Training-time only.</p>
+          <p style="margin-top: 0.5rem;"><span class="tag variant">GeoCond-E</span> error-supervised: pose error,
+            where target-domain labels exist.</p>
+          <p style="margin-top: 0.5rem;"><span class="tag variant">GeoCond-C</span> cycle-distilled: loop-closure
+            residuals of independent pose graphs. No ground truth needed, and it works for permutation-equivariant
+            backbones, where orbit variance vanishes.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ qualitative -->
+<section class="section" id="examples">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Qualitative examples</h2>
+    <div class="content has-text-centered lead" style="margin-bottom: 1.25rem;">
+      <p>Frozen VGGT-1B with the scalars-only GeoCond head. Use the arrows, the dots or the keyboard to browse.</p>
+    </div>
+
+    <div class="gallery-controls">
+      <div class="tabs is-toggle is-small">
+        <ul>
+          <li class="is-active" data-story="silent_failure"><a href="#examples">Silent failures</a></li>
+          <li data-story="ba_gate"><a href="#examples">Refinement gate</a></li>
+          <li data-story="reconstruction"><a href="#examples">Reconstruction</a></li>
+        </ul>
+      </div>
+      <div class="buttons has-addons dataset-switch">
+        <button type="button" class="button is-small is-selected" data-dataset="megaunscene">Outdoor &middot; MegaUnScene</button>
+        <button type="button" class="button is-small" data-dataset="7scenes">Indoor &middot; 7-Scenes</button>
+      </div>
+    </div>
+
+    <div class="gallery-stage" id="gallery-stage" tabindex="0" aria-label="Qualitative example viewer; use the left and right arrow keys">
+      <a id="gallery-link" href="static/qualitative/megaunscene_silent_0.webp" target="_blank" rel="noopener" title="Open full size">
+        <img id="gallery-image" src="static/qualitative/megaunscene_silent_0.webp" alt="Qualitative example">
+      </a>
+    </div>
+    <div class="gallery-footer">
+      <div class="gallery-caption" id="gallery-caption"></div>
+      <div class="gallery-pager">
+        <button type="button" class="gallery-nav" id="gallery-prev" aria-label="Previous example"><i class="fas fa-chevron-left"></i></button>
+        <div class="gallery-dots" id="gallery-dots"></div>
+        <button type="button" class="gallery-nav" id="gallery-next" aria-label="Next example"><i class="fas fa-chevron-right"></i></button>
+        <div class="gallery-counter" id="gallery-counter"></div>
+      </div>
+    </div>
+    <p class="gallery-note">
+      All examples come from scenes that were not used to train the GeoCond head (7-Scenes office and chess, and the
+      held-out MegaUnScene reconstructions) and are selected by fixed rules on the measured errors. Percentiles are
+      computed among the held-out pairs of the same dataset.
+    </p>
+  </div>
+</section>
+
+<!-- ================================================================ results -->
+<section class="section is-shaded" id="results">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Results</h2>
+
+    <h3 class="title is-4">Uncertainty and gated refinement on VGGT</h3>
+    <div class="table-wrap">
+      <table class="results">
+        <thead>
+          <tr class="group">
+            <th rowspan="2">Method</th>
+            <th colspan="2">Uncertainty AUSE &darr;</th>
+            <th colspan="2">Final AUC@30 &uarr;</th>
+          </tr>
+          <tr><th>indoor</th><th>outdoor / OOD</th><th>indoor</th><th>outdoor / OOD</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Native aleatoric (VGGT)</td><td>0.19</td><td>0.32</td><td>&ndash;</td><td>&ndash;</td></tr>
+          <tr class="ours"><td>GeoCond-O (mix)</td><td class="best">0.17</td><td class="best">0.20</td><td>53.5</td><td>58.4</td></tr>
+          <tr class="ours"><td>GeoCond-O (7S), zero-shot</td><td>0.21</td><td>0.21</td><td>53.0</td><td>47.8</td></tr>
+          <tr><td>Feed-forward always</td><td>&ndash;</td><td>&ndash;</td><td>51.6</td><td class="best">60.3</td></tr>
+          <tr><td>BA always</td><td>&ndash;</td><td>&ndash;</td><td class="best">53.6</td><td>38.4</td></tr>
+          <tr class="sep reference"><td>Orbit variance (K&nbsp;=&nbsp;6, teacher)</td><td>0.17</td><td>0.16</td><td>&ndash;</td><td>&ndash;</td></tr>
+          <tr class="reference"><td>Oracle</td><td>&ndash;</td><td>&ndash;</td><td>56.0</td><td>60.9</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-caption">
+      Table 3 in the paper. Scene-disjoint evaluation on held-out indoor (7-Scenes) and outdoor (MegaUnScene) scenes. AUSE ranks pose
+      error; final AUC@30 is measured after the refine-or-keep decision. <i>mix</i>: trained on 7-Scenes plus
+      MegaUnScene training scenes. <i>7S</i>: trained on 7-Scenes only, so its outdoor column is strict zero-shot.
+      BA: bundle adjustment. Bold marks the best deployable value per column; the teacher and the oracle are
+      references.
+    </p>
+
+    <div class="content has-text-justified" style="margin-top: 1.25rem;">
+      <p>
+        The one-pass head matches the six-pass orbit teacher indoors and lowers OOD AUSE from 0.32 (native
+        confidence) to 0.20. Trained on indoor data alone it still reaches 0.21 (0.216&nbsp;&plusmn;&nbsp;0.015 over
+        five seeds), so the uncertainty output transfers without target-domain labels. A five-member deep ensemble
+        and MC-dropout reach comparable OOD AUSE (0.20 and 0.195) but need about five backbone passes.
+      </p>
+      <p>
+        The gate behaves differently in the two domains. Indoors it beats keeping the feed-forward pose (53.5 vs.
+        51.6 AUC@30) and is within 0.1 of always running bundle adjustment. Outdoors, always running bundle
+        adjustment collapses to 38.4; the mix-trained gate avoids most of that loss (58.4) but stays below keeping
+        the feed-forward pose (60.3). Out of distribution, its value is in preventing harmful refinement. The gate
+        also does not transfer zero-shot (47.8): it needs labelled pairs from a domain where bundle adjustment
+        behaves as in the target.
+      </p>
+    </div>
+
+    <figure class="figure is-framed">
+      <a href="static/images/ood_generality.png" target="_blank" rel="noopener">
+        <img src="static/images/ood_generality.png" width="2041" height="816" loading="lazy"
+             alt="Two bar charts on held-out OOD scenes. Left, AUSE: orbit teacher 0.16, native confidence 0.32, GeoCond-O 7S 0.22, GeoCond-O mix 0.21. Right, AUC@30: feed-forward always 60.3, BA always 38.4, 7S gate 46.0, mix gate 57.6, oracle 60.9.">
+      </a>
+      <figcaption>Held-out MegaUnScene scenes, mean and spread over five seeds. <b>Left:</b> uncertainty ranking.
+        <b>Right:</b> refinement policies. These five-seed means differ slightly from the values in the table above.</figcaption>
+    </figure>
+
+    <h3 class="title is-4">Which features matter</h3>
+    <div class="table-wrap">
+      <table class="results">
+        <thead>
+          <tr class="group">
+            <th rowspan="2">Input set</th>
+            <th colspan="2">indoor AUSE &darr;</th>
+            <th colspan="2">OOD AUSE &darr;</th>
+          </tr>
+          <tr><th>AUSE</th><th>&Delta;</th><th>AUSE</th><th>&Delta;</th></tr>
+        </thead>
+        <tbody>
+          <tr class="ours"><td>all conditioning features (default)</td><td>0.165&plusmn;0.006</td><td>+0.000</td><td>0.209&plusmn;0.004</td><td>+0.000</td></tr>
+          <tr class="sep"><td>&minus; parallax</td><td>0.149&plusmn;0.003</td><td>&minus;0.016</td><td>0.213&plusmn;0.003</td><td>+0.003</td></tr>
+          <tr><td>&minus; overlap / co-visibility</td><td>0.157&plusmn;0.003</td><td>&minus;0.008</td><td>0.215&plusmn;0.003</td><td>+0.005</td></tr>
+          <tr><td>&minus; baseline</td><td>0.161&plusmn;0.006</td><td>&minus;0.004</td><td>0.202&plusmn;0.004</td><td>&minus;0.007</td></tr>
+          <tr><td>&minus; relative rotation</td><td>0.172&plusmn;0.008</td><td>+0.007</td><td>0.200&plusmn;0.004</td><td>&minus;0.009</td></tr>
+          <tr><td>&minus; camera-head correction (rot. + trans.)</td><td>0.191&plusmn;0.003</td><td>+0.026</td><td>0.273&plusmn;0.005</td><td>+0.064</td></tr>
+          <tr><td>&minus; native confidence</td><td>0.210&plusmn;0.005</td><td>+0.045</td><td>0.227&plusmn;0.006</td><td>+0.017</td></tr>
+          <tr><td>native confidence only</td><td>0.250&plusmn;0.020</td><td>+0.085</td><td>0.339&plusmn;0.003</td><td>+0.130</td></tr>
+          <tr><td>geometry only (parallax, overlap, baseline, rotation)</td><td>0.365&plusmn;0.016</td><td>+0.200</td><td>0.359&plusmn;0.009</td><td>+0.149</td></tr>
+          <tr><td>stability only (camera-head correction, native conf.)</td><td>0.193&plusmn;0.008</td><td>+0.028</td><td>0.246&plusmn;0.003</td><td>+0.037</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-caption">
+      Table 5 in the paper. The GeoCond-O (mix) head is retrained in the protocol of the table above after removing
+      one feature or feature group; mean&nbsp;&plusmn;&nbsp;std over five seeds. &Delta; is the paired AUSE change
+      against the full head, where positive is worse.
+    </p>
+    <div class="content has-text-justified" style="margin-top: 1rem;">
+      <p>
+        The largest OOD degradation comes from removing the camera-head correction (0.209 to 0.273), and the largest
+        indoor degradation from removing native confidence (0.165 to 0.210). These backbone stability signals carry
+        most of the ranking: alone they reach 0.193 / 0.246, against 0.365 / 0.359 for the four geometric cues
+        alone. Individual geometric cues are partly redundant, but together they improve on the stability signals
+        by 0.03&ndash;0.04 AUSE.
+      </p>
+    </div>
+
+    <h3 class="title is-4">Adapting to other backbones</h3>
+    <div class="table-wrap">
+      <table class="results">
+        <thead>
+          <tr><th>Backbone</th><th>Native</th><th>VGGT-trained</th><th>GeoCond-E</th><th>GeoCond-C</th><th>Cycle fusion*</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>VGGT</td><td>0.279</td><td>(0.230)</td><td class="best">0.230</td><td>0.287</td><td>0.108</td></tr>
+          <tr><td>&pi;<sup>3</sup></td><td>0.333</td><td>0.286</td><td>0.221</td><td class="best">0.187</td><td>0.108</td></tr>
+          <tr><td>DUSt3R</td><td>0.182</td><td>0.460</td><td class="best">0.162</td><td>0.211</td><td>0.119</td></tr>
+          <tr><td>Fast3R</td><td>0.238</td><td>0.230</td><td class="best">0.184</td><td>0.185</td><td>0.132</td></tr>
+          <tr><td>CUT3R</td><td>0.391</td><td>0.334</td><td>0.314</td><td class="best">0.305</td><td>0.150</td></tr>
+          <tr><td>MapAnything</td><td class="best">0.209</td><td>0.496</td><td>0.240</td><td>0.251</td><td>0.147</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-caption">
+      Table 6 in the paper. AUSE &darr; on independent MegaUnScene edge sets; best single-pass value per row in bold. For VGGT, the
+      VGGT-trained head is GeoCond-E itself. *Cycle fusion combines the score with raw cycle residuals at inference,
+      so it needs independent-edge pose graphs and is not a single-pass score.
+    </p>
+    <div class="content has-text-justified" style="margin-top: 1rem;">
+      <p>
+        No single training source wins on every backbone. Error supervision beats native confidence on five of six
+        backbones. The VGGT-trained head and the ground-truth-free cycle-distilled head help on &pi;<sup>3</sup>,
+        Fast3R and CUT3R but not on DUSt3R or MapAnything. &pi;<sup>3</sup> is permutation-equivariant, so it has no
+        orbit variance to distil; there the cycle-distilled head gives the best single-pass score.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ downstream -->
+<section class="section" id="downstream">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Using the reliability signal</h2>
+    <div class="content has-text-centered lead">
+      <p>The same uncertainty drives four downstream decisions. For thresholded decisions it is first Platt-scaled into a failure probability.</p>
+    </div>
+    <div class="columns is-multiline stats">
+      <div class="column is-3-desktop is-6-tablet">
+        <div class="stat">
+          <div class="value">64%<span class="vs">vs</span><span class="base">36%</span></div>
+          <div class="stat-label"><b>Curation.</b> Pose pseudo-labels kept on MegaUnScene at a 10% target catastrophic-label
+            rate, against native confidence at the same realised risk.</div>
+        </div>
+      </div>
+      <div class="column is-3-desktop is-6-tablet">
+        <div class="stat">
+          <div class="value">3.0<span class="vs">vs</span><span class="base">3.85</span></div>
+          <div class="stat-label"><b>Capture.</b> Frames needed on average to match the accuracy of all eight, when
+            capture stops on calibrated uncertainty rather than native confidence (best fixed count: 4.0).</div>
+        </div>
+      </div>
+      <div class="column is-3-desktop is-6-tablet">
+        <div class="stat">
+          <div class="value">11.6&deg;<span class="vs">vs</span><span class="base">15.1&deg;</span></div>
+          <div class="stat-label"><b>Pose graphs.</b> Median global rotation error on MegaUnScene with an
+            uncertainty-selected spanning tree vs. uniform weighting (oracle 9.6&deg;).</div>
+        </div>
+      </div>
+      <div class="column is-3-desktop is-6-tablet">
+        <div class="stat">
+          <div class="value">0.80<span class="vs">vs</span><span class="base">0.66</span></div>
+          <div class="stat-label"><b>Calibration.</b> Out-of-distribution failure AUROC, GeoCond vs. native
+            confidence. After Platt scaling, GeoCond's ECE is 0.038.</div>
+        </div>
+      </div>
+    </div>
+    <figure class="figure is-framed">
+      <a href="static/images/pose_graph.png" target="_blank" rel="noopener">
+        <img src="static/images/pose_graph.png" width="2040" height="819" loading="lazy"
+             alt="Two bar charts of median global rotation error after rotation averaging. On MegaUnScene: uniform 15.1, aleatoric 13.9, random tree 14.8, uncertainty-weighted 12.7, uncertainty-selected tree 11.6, oracle 9.6 degrees. On 7-Scenes the differences are smaller.">
+      </a>
+      <figcaption>Rotation averaging of independent pairwise poses (six views, 80 view sets), median with
+        interval. On held-out 7-Scenes, where catastrophic edges are rarer, the gains are smaller and not
+        statistically significant.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ================================================================ closing statement -->
+<section class="section is-shaded" id="takeaway">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">A trust signal, not another reconstruction method</h2>
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
+        <div class="content lead">
+          <p>
+            GeoCond does not predict geometry. The backbone and its output stay as they are; GeoCond adds, for every
+            relative pose, an estimate of how far that pose can be trusted and whether refining it is likely to help,
+            with a head that costs 0.2% of a VGGT forward pass.
+          </p>
+          <p>
+            Systems built on feed-forward models need exactly this to act on their output: keep a pose or refine it,
+            weight it in a pose graph, discard it as a pseudo-label, or capture another view. Because GeoCond sits on
+            a frozen backbone, the same recipe attaches to other feed-forward models without retraining them; we
+            adapted it to five backbones besides VGGT, with results that depend on the backbone and on the
+            supervision available.
+          </p>
+          <p class="takeaway-line">
+            Feed-forward models are fast enough to replace optimisation in many pipelines. GeoCond tells those
+            pipelines when the output should not be taken at face value.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ bibtex -->
+<section class="section" id="BibTeX">
+  <div class="container is-max-desktop content">
+    <h2 class="title is-3">BibTeX</h2>
+    <div class="bibtex-box">
+      <button type="button" class="button is-small copy-button" id="copy-bibtex">
+        <span class="icon"><i class="far fa-copy"></i></span><span class="copy-label">Copy</span>
+      </button>
+<pre><code id="bibtex-text">@inproceedings{ahmedtaristizabal2027geocond,
+  title     = {{GeoCond}: A Conditioning-Aware Reliability Adapter for Feed-Forward {3D} Reconstruction},
+  author    = {Ahmedt-Aristizabal, David and Armin, Mohammad Ali and Tsuchida, Russell and Petersson, Lars},
+  booktitle = {Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision (WACV)},
+  year      = {2027}
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container is-max-desktop">
+    <div class="content has-text-centered">
+      <p>
+        The layout of this page follows the <a href="https://github.com/nerfies/nerfies.github.io" target="_blank" rel="noopener">Nerfies</a>
+        project-page template, as do the VGGT, MapAnything and Puzzles pages that inspired it.
+        This website is licensed under a <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">Creative Commons
+        Attribution-ShareAlike 4.0 International License</a>; the photographs keep their own licences, listed under
+        <a href="#credits">Image credits</a>.
+      </p>
+    </div>
+    <details class="credits" id="credits">
+      <summary>Image credits</summary>
+      <p>
+        The outdoor photographs in the opening example and the gallery are from Wikimedia Commons, through the
+        MegaUnScene dataset; each keeps the licence of its file page. Point clouds and camera maps are VGGT
+        reconstructions from these photographs.
+      </p>
+      <ul id="credits-list"></ul>
+    </details>
+  </div>
+</footer>
+
+<script src="static/js/demo-data.js"></script>
+<script src="static/js/gallery-data.js"></script>
+<script src="static/js/credits-data.js"></script>
+<script src="static/js/index.js"></script>
+</body>
+</html>
